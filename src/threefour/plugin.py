@@ -7,6 +7,7 @@ from selenium.common.exceptions import NoSuchElementException
 from nose.plugins import Plugin
 from django.core.handlers.wsgi import WSGIHandler
 from django.core.servers.basehttp import AdminMediaHandler
+from django.core.exceptions import ImproperlyConfigured
 from django.test import utils
 from django.db import connection
 
@@ -40,15 +41,15 @@ class ServerPlugin(Plugin):
     activation_parameter = '--with-threefour'
 
     def __init__(self):
-        Plugin.__init__(self)
+        super(ServerPlugin, self).__init__()
         self.server_started = False
         self.server_thread = None
 
     def options(self, parser, env=os.environ):
-        Plugin.options(self, parser, env)
+        super(ServerPlugin, self).options(parser, env)
 
     def configure(self, options, config):
-        Plugin.configure(self, options, config)
+        super(ServerPlugin, self).configure(options, config)
 
     def begin(self):
         utils.setup_test_environment()
@@ -70,8 +71,6 @@ class ServerPlugin(Plugin):
          self.httpd = CherryPyWSGIServer((address, port), application, server_name='django-test-http')
          self.httpd_thread = Thread(target=self.httpd.start)
          self.httpd_thread.start()
-         #FIXME: This could be avoided by passing self to thread class starting django
-         # and waiting for Event lock
          sleep(.5)
 
     def stop_server(self):
@@ -80,20 +79,24 @@ class ServerPlugin(Plugin):
             self.server_started = False
 
     def check_database_multithread_compilant(self):
-        # When using memory database, complain as we'd use indepenent databases
         from django.conf import settings
-        if settings.DATABASE_ENGINE == 'sqlite3' \
-            and (not getattr(settings, 'TEST_DATABASE_NAME', False) or settings.TEST_DATABASE_NAME == ':memory:'):
-            self.skipped = True
-            return False
-            #raise SkipTest("You're running database in memory, but trying to use live server in another thread. Skipping.")
+        for name in settings.DATABASES:
+            database = settings.DATABASES[name]
+            if 'TEST_NAME' in database:
+                name = database['TEST_NAME']
+            else:
+                name = database['NAME']
+            if name == ':memory:':
+                raise ImproperlyConfigured('Your Django database settings '
+                    'for %s use SQLite in-memory database, this is '
+                    'unsupported since we are using a multithreaded live '
+                    'server')
         return True
 
     def startTest(self, test):
         from django.conf import settings
-        test_case = get_test_case_class(test)
-        test_instance = get_test_case_instance(test)
-        if not self.server_started and getattr(test_case, "start_live_server", False):
+        test_instance = test.test
+        if not self.server_started:
             if not self.check_database_multithread_compilant():
                 return
             self.start_server(
@@ -107,7 +110,6 @@ class ServerPlugin(Plugin):
 
         from selenium import FIREFOX
         browser = connect(getattr(settings, "SELENIUM_BROWSER", FIREFOX))
-        import pdb; pdb.set_trace()
         #          getattr(settings, "SELENIUM_HOST", 'localhost'),
         #          int(getattr(settings, "SELENIUM_PORT", 4444)),
         #          getattr(settings, "SELENIUM_BROWSER_COMMAND", '*opera'),
