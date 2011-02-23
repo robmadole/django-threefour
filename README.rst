@@ -2,6 +2,8 @@
 django-threefour
 ================
 
+*WARNING THIS IS NOT FUNCTIONAL YET*
+
 Purpose
 -------
 
